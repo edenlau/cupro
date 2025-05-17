@@ -55,3 +55,52 @@ Project Organization
 --------
 
 <p><small>Project based on the <a target="_blank" href="https://drivendata.github.io/cookiecutter-data-science/">cookiecutter data science project template</a>. #cookiecutterdatascience</small></p>
+
+Installation
+------------
+Create a virtual environment and install the dependencies:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Running the FastAPI server
+--------------------------
+The web application is defined in `src/main_web.py`. Start the server with:
+
+```bash
+python src/main_web.py
+```
+
+By default the app listens on port `8081`. Open `http://localhost:8081` in your browser after starting the server.
+
+Using Docker
+------------
+Build the Docker image from the repository root:
+
+```bash
+docker build -t cupro-app .
+```
+
+Run the container exposing the same port as the local server:
+
+```bash
+docker run --env-file env.example -p 8081:8081 cupro-app
+```
+
+Deploying to AWS
+----------------
+Push the Docker image to Amazon ECR and run it on ECS or another service:
+
+```bash
+aws ecr create-repository --repository-name cupro-app
+aws ecr get-login-password | docker login --username AWS --password-stdin <aws-account-id>.dkr.ecr.<region>.amazonaws.com
+
+docker tag cupro-app:latest <aws-account-id>.dkr.ecr.<region>.amazonaws.com/cupro-app:latest
+
+docker push <aws-account-id>.dkr.ecr.<region>.amazonaws.com/cupro-app:latest
+```
+
+Once pushed, create an ECS task definition pointing to the image and run it using ECS Fargate or another container service.
