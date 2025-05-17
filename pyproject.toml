@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cupro"
+version = "0.1.0"
+description = "Discover entities in travel discussions"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "python-dotenv",
+    "requests",
+    "pytz",
+    "fastapi",
+    "openai",
+    "httpx",
+    "markdown",
+    "uvicorn[standard]",
+    "python-multipart",
+    "click",
+]
+
+[project.scripts]
+cupro-web = "main_web:main"
+cupro-web-copy = "main_web_copy:main"
+cupro-search = "search:main"
+cupro-make-dataset = "data.make_dataset:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

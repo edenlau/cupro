@@ -10,3 +10,4 @@ httpx
 markdown
 uvicorn[standard]
 python-multipart
+click
