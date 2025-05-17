@@ -60,6 +60,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <p><small>Project based on the <a target="_blank" href="https://drivendata.github.io/cookiecutter-data-science/">cookiecutter data science project template</a>. #cookiecutterdatascience</small></p>
 
+## Disclaimer
+
+Summaries and analyses in this project are generated using OpenAI's models and may contain errors or inaccuracies. Please verify any generated content before relying on it.
+
 ## Running tests
 
 This project uses [pytest](https://pytest.org) for unit tests. Run them with
