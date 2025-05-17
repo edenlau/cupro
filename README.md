@@ -7,7 +7,6 @@ Project Organization
 ------------
 
     ├── LICENSE
-    ├── Makefile           <- Makefile with commands like `make data` or `make train`
     ├── README.md          <- The top-level README for developers using this project.
     ├── data
     │   ├── external       <- Data from third party sources.
@@ -73,3 +72,24 @@ executed with Python's built-in `unittest` runner:
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+## Running the application
+
+Install the dependencies from `requirements.txt` and start the FastAPI server:
+
+```bash
+python src/main_web.py
+```
+
+The service listens on port `8081` by default. Set the `PORT` environment variable to override it.
+
+## Docker
+
+Build the Docker image and run it locally using the provided `Dockerfile`:
+
+```bash
+docker build -t cupro .
+docker run --env-file env.example -p 8081:8081 cupro
+```
+
+This starts the application inside a container and exposes it on <http://localhost:8081>.
