@@ -1,0 +1,12 @@
+pandas
+numpy
+matplotlib
+python-dotenv
+requests
+pytz
+fastapi
+openai
+httpx
+markdown
+uvicorn[standard]
+python-multipart
