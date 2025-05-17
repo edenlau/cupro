@@ -1,39 +1,80 @@
 import os
-import pandas as pd
-import numpy as np
+# Attempt to import pandas; fall back to None if unavailable
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover - pandas may not be installed
+    pd = None
+
+# NumPy is optional for running unit tests
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - numpy may not be installed
+    np = None
 # Set matplotlib to non-interactive 'Agg' backend before importing pyplot
-import matplotlib
-matplotlib.use('Agg')  # Use the Agg backend for non-interactive image generation
-import matplotlib.pyplot as plt
+try:
+    import matplotlib
+    matplotlib.use('Agg')  # Use the Agg backend for non-interactive image generation
+    import matplotlib.pyplot as plt
+except ImportError:  # pragma: no cover - matplotlib may not be installed
+    matplotlib = None
+    plt = None
 from datetime import datetime, timedelta
 import base64
 from io import BytesIO
 import re
 import time
-from dotenv import load_dotenv
-import requests
-from requests.exceptions import ConnectionError, Timeout, RequestException
-import pytz
+# Optional imports used for the web application. They are not required for unit
+# tests and may be missing in minimal environments.
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - python-dotenv may not be installed
+    def load_dotenv(*args, **kwargs):
+        return False
+try:
+    import requests
+    from requests.exceptions import ConnectionError, Timeout, RequestException
+except ImportError:  # pragma: no cover - requests may not be installed
+    requests = None
+    ConnectionError = Timeout = RequestException = Exception
+from zoneinfo import ZoneInfo
 import sys
-from fastapi import FastAPI, Form, BackgroundTasks
-from fastapi.responses import HTMLResponse, JSONResponse
-import uvicorn
-import openai
-from openai import OpenAI
+try:
+    from fastapi import FastAPI, Form, BackgroundTasks
+    from fastapi.responses import HTMLResponse, JSONResponse
+    import uvicorn
+except ImportError:  # pragma: no cover - fastapi/uvicorn may not be installed
+    FastAPI = Form = BackgroundTasks = HTMLResponse = JSONResponse = None
+    uvicorn = None
+try:
+    import openai
+    from openai import OpenAI
+except ImportError:  # pragma: no cover - openai may not be installed
+    openai = None
+    OpenAI = None
 import json
-import httpx  # Add this import
-from markdown import markdown as md_to_html
+try:
+    import httpx  # Add this import
+except ImportError:  # pragma: no cover - httpx may not be installed
+    httpx = None
+try:
+    from markdown import markdown as md_to_html
+except ImportError:  # pragma: no cover - markdown may not be installed
+    md_to_html = None
 import ast  # for safer literal evaluation
 import uuid
 # Import web search functionality
-from search import search_web_mentions, generate_ai_summary
+try:
+    from .search import search_web_mentions, generate_ai_summary
+except Exception:  # pragma: no cover - search module may not be available
+    search_web_mentions = generate_ai_summary = None
 
 # Always load .env first so env vars are set
 load_dotenv(override=True)
 print("Environment variables loaded")
 
-# Print OpenAI version to verify
-print("OpenAI version:", openai.__version__)
+# Print OpenAI version to verify if available
+if openai is not None:
+    print("OpenAI version:", openai.__version__)
 
 # Check if proxy environment variables are set (which can cause issues)
 for var in ("HTTP_PROXY", "HTTPS_PROXY"):
@@ -62,8 +103,12 @@ else:
 print(f"API credentials found: {bool(API_TOKEN)} and OpenAI: {bool(OPENAI_API_KEY)}")
 
 # Correct way to initialize the OpenAI client without proxies
-http_client = httpx.Client(trust_env=False)
-client = OpenAI(api_key=OPENAI_API_KEY, http_client=http_client)
+if openai is not None and httpx is not None and OPENAI_API_KEY:
+    http_client = httpx.Client(trust_env=False)
+    client = OpenAI(api_key=OPENAI_API_KEY, http_client=http_client)
+else:  # pragma: no cover - in unit test environment
+    http_client = None
+    client = None
 
 # --- CONFIGURATION ---
 # List of topic display names
@@ -135,11 +180,17 @@ TOPIC_CONTEXT = {
     "PolyU": "The Hong Kong Polytechnic University (香港理工大學) – A public university with strong emphasis on applied science, engineering, business, and design. Established in 1937 as a trade school and gained university status in 1994. Known as 理大 (Lei Dai)."
 }
 
-# Create DataFrame for topic names
-topics_df = pd.DataFrame({
-    'topic_name': TOPIC_LIST,
-    'name_variations': [t for t in TOPIC_LIST]  # Use topic names as variations
-})
+# Create DataFrame for topic names if pandas is available; otherwise store a list
+if pd is not None:
+    topics_df = pd.DataFrame({
+        'topic_name': TOPIC_LIST,
+        'name_variations': [t for t in TOPIC_LIST]
+    })
+else:  # pragma: no cover - used only when pandas is missing
+    topics_df = [
+        {'topic_name': t, 'name_variations': t}
+        for t in TOPIC_LIST
+    ]
 
 # ---------------------------------------------------------------------------
 # In-memory job store for background report generation (Option B polling).
@@ -272,28 +323,27 @@ def get_brandwatch_data(start_date, end_date, project_id=None, account_id=None):
         raise
 
 def convert_to_hk_time(date_str):
-    """
-    Convert date string to Hong Kong time
-    Handles various UTC date formats from Brandwatch API
-    """
+    """Convert a date string to Hong Kong time."""
     try:
-        # Return None for None values
         if date_str is None:
             return None
-            
-        # Try parsing with timezone info
-        dt = pd.to_datetime(date_str)
-        
-        # If no timezone info, assume UTC
-        if dt.tzinfo is None:
-            dt = pytz.UTC.localize(dt)
-            
-        # Convert to Hong Kong time
-        hk_tz = pytz.timezone('Asia/Hong_Kong')
+
+        if pd is not None:
+            dt = pd.to_datetime(date_str)
+            if dt.tzinfo is None:
+                dt = dt.tz_localize("UTC")
+        else:
+            # Basic ISO 8601 parsing without pandas
+            if date_str.endswith("Z"):
+                date_str = date_str[:-1] + "+00:00"
+            dt = datetime.fromisoformat(date_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+
+        hk_tz = ZoneInfo("Asia/Hong_Kong")
         return dt.astimezone(hk_tz)
-    except Exception as e:
+    except Exception as e:  # pragma: no cover - defensive programming
         print(f"Error processing date {date_str}: {e}")
-        # Return None for failed conversions instead of raising an exception
         return None
 
 # --- Topic mention classification and summary functions ---
@@ -719,51 +769,65 @@ def process_brandwatch_data(data, start_dt, end_dt, topics_df):
     return result_df
 
 def calculate_buzz_volume(df):
-    """
-    Calculate buzz volume as count of unique originalUrls per topic and date
-    """
-    if df.empty:
+    """Calculate buzz volume as unique URL count per topic and date."""
+    if pd is not None and hasattr(df, "empty"):
+        if df.empty:
+            print("[WARNING] No data to calculate buzz volume")
+            return pd.DataFrame()
+
+        print(f"[DEBUG] Buzz calculation input: {df.shape}")
+        buzz = df.groupby(['topic', 'date_day']).originalUrl.nunique().reset_index(name='buzz_volume')
+        print(f"[INFO] Calculated buzz volume using unique originalUrls")
+        print("[DEBUG] Raw buzz counts:")
+        print(buzz)
+
+        pivot = buzz.pivot(index='topic', columns='date_day', values='buzz_volume')
+        try:
+            dr = date_range
+        except NameError:
+            dr = sorted(pivot.columns)
+        pivot = pivot.reindex(columns=dr)
+
+        date_format_map = {d: datetime.strptime(d, '%Y-%m-%d').strftime('%d %b') for d in pivot.columns}
+        pivot = pivot.rename(columns=date_format_map)
+        pivot = pivot.reindex(TOPIC_LIST)
+        pivot = pivot.fillna(0).astype(int)
+        print("[DEBUG] Final pivot table shape:", pivot.shape)
+        return pivot
+
+    # Fallback implementation without pandas
+    records = list(df)
+    if not records:
         print("[WARNING] No data to calculate buzz volume")
-        return pd.DataFrame()
-    
-    # Print data shape before calculation
-    print(f"[DEBUG] Buzz calculation input: {df.shape}")
-    
-    # Count unique originalUrls by topic and date
-    buzz = df.groupby(['topic', 'date_day']).originalUrl.nunique().reset_index(name='buzz_volume')
-    print(f"[INFO] Calculated buzz volume using unique originalUrls")
-    
-    # Print the raw counts
-    print("[DEBUG] Raw buzz counts:")
-    print(buzz)
-    
-    # Create pivot table using date_day
-    pivot = buzz.pivot(index='topic', columns='date_day', values='buzz_volume')
-    # Ensure all days present, even if no mentions
+        return {}
+
+    # Count unique URLs by topic/date
+    counts = {}
+    unique_dates = set()
+    for row in records:
+        topic = row['topic']
+        date = row['date_day']
+        unique_dates.add(date)
+        counts.setdefault(topic, {}).setdefault(date, set()).add(row['originalUrl'])
+
     try:
-        dr = date_range  # from process_report
+        dr = date_range
     except NameError:
-        dr = sorted(pivot.columns)
-    pivot = pivot.reindex(columns=dr)
-    
-    # Format the column names for display (keep data in chronological order)
-    # Create a mapping dictionary from date_day to formatted date
-    date_format_map = {}
-    for date_day in pivot.columns:
-        date_obj = datetime.strptime(date_day, '%Y-%m-%d')
-        date_format_map[date_day] = date_obj.strftime('%d %b')
-    
-    # Rename columns using the mapping
-    pivot = pivot.rename(columns=date_format_map)
-    
-    # Ensure all topics are included
-    pivot = pivot.reindex(TOPIC_LIST)
-    
-    # Fill NaN values with 0
-    pivot = pivot.fillna(0).astype(int)
-    
-    print("[DEBUG] Final pivot table shape:", pivot.shape)
-    return pivot
+        dr = sorted(unique_dates)
+
+    result = {}
+    for topic in TOPIC_LIST:
+        row = {}
+        for d in dr:
+            row[d] = len(counts.get(topic, {}).get(d, set()))
+        result[topic] = row
+
+    date_map = {d: datetime.strptime(d, '%Y-%m-%d').strftime('%d %b') for d in dr}
+    formatted = {
+        topic: {date_map[d]: v for d, v in vals.items()}
+        for topic, vals in result.items()
+    }
+    return formatted
 
 def create_charts(pivot_data):
     """

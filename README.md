@@ -59,3 +59,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 --------
 
 <p><small>Project based on the <a target="_blank" href="https://drivendata.github.io/cookiecutter-data-science/">cookiecutter data science project template</a>. #cookiecutterdatascience</small></p>
+
+## Running tests
+
+This project uses [pytest](https://pytest.org) for unit tests. Run them with
+`pytest` if it is available. If `pytest` is not installed, the tests can also be
+executed with Python's built-in `unittest` runner:
+
+```bash
+python -m unittest discover -s tests -v
+```
