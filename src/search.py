@@ -4,27 +4,31 @@ import sys
 import time
 import json
 import re
+import logging
 from datetime import datetime, timedelta
 import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 import httpx
 
+# Set up logging
+logger = logging.getLogger(__name__)
+
 # Load environment variables
 load_dotenv(override=True)
-print("Environment variables loaded")
+logger.info("Environment variables loaded")
 
 # Get OpenAI API key from environment variable
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
-    print("[ERROR] OPENAI_API_KEY is not set in your .env file")
+    logger.error("OPENAI_API_KEY is not set in your .env file")
     sys.exit(1)
-print("[INFO] OpenAI API key found")
+logger.info("OpenAI API key found")
 
 # Load Perplexity API key
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 if not PERPLEXITY_API_KEY:
-    print("[WARNING] PERPLEXITY_API_KEY is not set in your .env file. Add PERPLEXITY_API_KEY=YOUR_KEY")
+    logger.warning("PERPLEXITY_API_KEY is not set in your .env file. Add PERPLEXITY_API_KEY=YOUR_KEY")
 
 # Initialize OpenAI client without proxies
 http_client = httpx.Client(trust_env=False)
@@ -53,7 +57,7 @@ def search_web_mentions(query, hours=24, max_items=50):
         Each dict has 'title', 'snippet', 'url'.
     """
     if not PERPLEXITY_API_KEY:
-        print("[ERROR] Cannot perform Perplexity search – PERPLEXITY_API_KEY missing.")
+        logger.error("Cannot perform Perplexity search – PERPLEXITY_API_KEY missing.")
         return []
 
     # Build prompt – instruct model to respect recency window & JSON structure
@@ -78,11 +82,11 @@ def search_web_mentions(query, hours=24, max_items=50):
         "max_tokens": 1200
     }
 
-    print(f"[INFO] Calling Perplexity API for query (last {hours}h): {query[:80]}…")
+    logger.info("Calling Perplexity API for query (last %s h): %s…", hours, query[:80])
     try:
         r = requests.post(PERPLEXITY_ENDPOINT, headers=headers, json=payload, timeout=45)
         if r.status_code != 200:
-            print(f"[ERROR] Perplexity API error {r.status_code}: {r.text[:200]}")
+            logger.error("Perplexity API error %s: %s", r.status_code, r.text[:200])
             return []
         data = r.json()
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
@@ -101,10 +105,10 @@ def search_web_mentions(query, hours=24, max_items=50):
                     results = []
             else:
                 results = []
-        print(f"[INFO] Retrieved {len(results)} results from Perplexity")
+        logger.info("Retrieved %s results from Perplexity", len(results))
         return results[:max_items]
     except Exception as exc:
-        print(f"[ERROR] Perplexity request failed: {exc}")
+        logger.error("Perplexity request failed: %s", exc)
         return []
 
 def generate_ai_summary(mentions):
@@ -192,7 +196,7 @@ Write in markdown format with clear section headings.
                 insights = ""
 
         except Exception as e:
-            print(f"[ERROR] Analysis generation failed: {e}")
+            logger.error("Analysis generation failed: %s", e)
             lcms_analysis = "Analysis generation failed."
             hkis_analysis = "Analysis generation failed."
             insights = "Insights generation failed."
@@ -208,7 +212,7 @@ Write in markdown format with clear section headings.
         }
 
     except Exception as e:
-        print(f"[ERROR] Failed to generate AI summary: {e}")
+        logger.error("Failed to generate AI summary: %s", e)
         return {
             "overall": f"Unable to generate summary: {str(e)}",
             "lcms_analysis": "No content found.",
@@ -219,7 +223,7 @@ Write in markdown format with clear section headings.
 
 def main():
     """Main function to run the script"""
-    print("\n=== HKIS & LCMS Web Mention Finder ===\n")
+    logger.info("=== HKIS & LCMS Web Mention Finder ===")
     
     # Search for mentions in the last 2 days (48 hours)
     days = 2
@@ -227,26 +231,26 @@ def main():
     mentions = search_web_mentions(query)
     
     if not mentions:
-        print(f"[INFO] No mentions found in the last {days} days.")
+        logger.info("No mentions found in the last %s days.", days)
         return
-    
-    print(f"[INFO] Found {len(mentions)} web mentions of HKIS and LCMS")
+
+    logger.info("Found %s web mentions of HKIS and LCMS", len(mentions))
     
     # Generate summary
     summary = generate_ai_summary(mentions)
     
     # Print summary
-    print("\n=== Summary of HKIS & LCMS Web Mentions ===\n")
-    print(summary["overall"])
-    print("\n--- LCMS Analysis ---")
-    print(summary["lcms_analysis"])
-    print("\n--- HKIS Analysis ---")
-    print(summary["hkis_analysis"])
-    print("\n--- Insights ---")
-    print(summary["insights"])
-    print("\n--- Source URLs ---")
+    logger.info("=== Summary of HKIS & LCMS Web Mentions ===")
+    logger.info(summary["overall"])
+    logger.info("--- LCMS Analysis ---")
+    logger.info(summary["lcms_analysis"])
+    logger.info("--- HKIS Analysis ---")
+    logger.info(summary["hkis_analysis"])
+    logger.info("--- Insights ---")
+    logger.info(summary["insights"])
+    logger.info("--- Source URLs ---")
     for url in summary["urls"]:
-        print(f"- {url}")
+        logger.info("- %s", url)
     
     # Save results to a file
     output_file = f"hkis_lcms_web_mentions_{datetime.now().strftime('%Y%m%d')}.txt"
@@ -263,9 +267,10 @@ def main():
             f.write("--- Source URLs ---\n")
             for url in summary["urls"]:
                 f.write(f"- {url}\n")
-        print(f"\n[INFO] Results saved to {output_file}")
+        logger.info("Results saved to %s", output_file)
     except Exception as e:
-        print(f"[ERROR] Failed to save results to file: {e}")
+        logger.error("Failed to save results to file: %s", e)
 
 if __name__ == "__main__":
-    main() 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    main()

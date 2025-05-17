@@ -1,4 +1,5 @@
 import os
+import logging
 import pandas as pd
 import numpy as np
 # Set matplotlib to non-interactive 'Agg' backend before importing pyplot
@@ -28,18 +29,20 @@ import uuid
 # Import web search functionality
 from search import search_web_mentions, generate_ai_summary
 
+logger = logging.getLogger(__name__)
+
 # Always load .env first so env vars are set
 load_dotenv(override=True)
-print("Environment variables loaded")
+logger.info("Environment variables loaded")
 
 # Print OpenAI version to verify
-print("OpenAI version:", openai.__version__)
+logger.info("OpenAI version: %s", openai.__version__)
 
 # Check if proxy environment variables are set (which can cause issues)
 for var in ("HTTP_PROXY", "HTTPS_PROXY"):
     proxy_value = os.environ.get(var)
     if proxy_value:
-        print(f"[WARNING] {var} is set to '{proxy_value}'. This may cause issues with OpenAI API.")
+        logger.warning("%s is set to '%s'. This may cause issues with OpenAI API.", var, proxy_value)
 
 # Load API credentials
 USERNAME = os.getenv("BRANDWATCH_USERNAME")
@@ -50,16 +53,16 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # Load Perplexity API key
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 if not PERPLEXITY_API_KEY:
-    print("[WARNING] PERPLEXITY_API_KEY not found in .env file. Web search will be disabled.")
+    logger.warning("PERPLEXITY_API_KEY not found in .env file. Web search will be disabled.")
 else:
-    print("[INFO] Perplexity API key found")
+    logger.info("Perplexity API key found")
 
 if not OPENAI_API_KEY:
-    print("[ERROR] OPENAI_API_KEY is not set in your .env file")
+    logger.error("OPENAI_API_KEY is not set in your .env file")
 else:
-    print("[INFO] OpenAI API key found")
+    logger.info("OpenAI API key found")
 
-print(f"API credentials found: {bool(API_TOKEN)} and OpenAI: {bool(OPENAI_API_KEY)}")
+logger.info("API credentials found: %s and OpenAI: %s", bool(API_TOKEN), bool(OPENAI_API_KEY))
 
 # Correct way to initialize the OpenAI client without proxies
 http_client = httpx.Client(trust_env=False)
@@ -74,7 +77,7 @@ TOPIC_LIST = [
     "university_hkust",
     "university_polyu"
 ]
-print("Topic configuration loaded (Hong Kong universities)")
+logger.info("Topic configuration loaded (Hong Kong universities)")
 
 # The actual tag names in Brandwatch
 TAG_NAMES = [
@@ -117,12 +120,12 @@ def get_first_project_id(account_id: str):
         "Accept": "application/json",
     }
     url = f"https://api.brandwatch.com/projects?accountId={account_id}"
-    print(f"[INFO] Resolving account {account_id} to projectId …")
+    logger.info("Resolving account %s to projectId …", account_id)
     data = make_request(url, headers)
     if not data.get("results"):
         raise RuntimeError(f"No projects found for account {account_id}")
     project_id = str(data["results"][0]["id"])
-    print(f"[INFO] Account {account_id} -> project {project_id}")
+    logger.info("Account %s -> project %s", account_id, project_id)
     _ACCOUNT_PROJECT_CACHE[account_id] = project_id
     return project_id
 
@@ -154,7 +157,7 @@ def get_default_dates():
     # Make sure we're using past dates, not future dates
     default_end = today.strftime('%Y-%m-%d')
     default_start = (today - timedelta(days=6)).strftime('%Y-%m-%d')
-    print(f"[INFO] Default date range: {default_start} to {default_end}")
+    logger.info("Default date range: %s to %s", default_start, default_end)
     return default_start, default_end
 
 # --- BRANDWATCH API HELPERS ---
@@ -177,7 +180,7 @@ def make_request(url, headers, retries=5):
     base_wait_time = 10  # shorter retry backoff base for quicker failure during debugging
     while attempt < retries:
         try:
-            print(f"[DEBUG] Request attempt {attempt+1}/{retries}: {url}")
+            logger.debug("Request attempt %s/%s: %s", attempt + 1, retries, url)
             response = requests.get(url, headers=headers, timeout=15)  # shorter per-request timeout
             if response.status_code == 200:
                 return response.json()
@@ -189,17 +192,18 @@ def make_request(url, headers, retries=5):
                 delay = min(base_wait_time * (2 ** attempt), 300)
                 time.sleep(delay)
             else:
-                print(f"[WARNING] Unexpected status {response.status_code}: {response.text[:200]}")
+                logger.warning("Unexpected status %s: %s", response.status_code, response.text[:200])
                 delay = min(base_wait_time * (2 ** attempt), 300)
                 time.sleep(delay)
         except (ConnectionError, Timeout, RequestException) as ex:
-            print(f"[ERROR] Connection error on attempt {attempt+1}: {ex}")
+            logger.error("Connection error on attempt %s: %s", attempt + 1, ex)
             delay = min(base_wait_time * (2 ** attempt), 300)
             time.sleep(delay)
         attempt += 1
         if attempt < retries:
             time.sleep(5)
-    raise Exception(f"[ERROR] Failed to retrieve data after {retries} attempts. URL: {url}")
+    logger.error("Failed to retrieve data after %s attempts. URL: %s", retries, url)
+    raise Exception(f"Failed to retrieve data after {retries} attempts. URL: {url}")
 
 def get_brandwatch_data(start_date, end_date, project_id=None, account_id=None):
     """Get data from Brandwatch API for a SINGLE account/project defined in .env (no region looping)."""
@@ -207,7 +211,7 @@ def get_brandwatch_data(start_date, end_date, project_id=None, account_id=None):
     account_id_use = account_id or BRANDWATCH_ACCOUNT_ID
     project_id_use = project_id or PROJECT_ID
 
-    print(f"[INFO] Querying Brandwatch project {project_id_use} under account {account_id_use}")
+    logger.info("Querying Brandwatch project %s under account %s", project_id_use, account_id_use)
     
     # Validate required credentials
     if not API_TOKEN:
@@ -222,7 +226,7 @@ def get_brandwatch_data(start_date, end_date, project_id=None, account_id=None):
         
         if account_id_use:
             headers["X-Account-Id"] = account_id_use
-            print(f"[INFO] Added account ID {account_id_use} to request headers")
+            logger.info("Added account ID %s to request headers", account_id_use)
         
         # Get query ID
         queries_url = f"https://api.brandwatch.com/projects/{project_id_use}/queries"
@@ -232,7 +236,7 @@ def get_brandwatch_data(start_date, end_date, project_id=None, account_id=None):
             raise Exception("[ERROR] No queries found in the project. Please check your PROJECT_ID.")
         
         query_id = queries_response['results'][0]['id']
-        print(f"[INFO] Using query ID: {query_id}")
+        logger.info("Using query ID: %s", query_id)
         
         # Build API URL with specific parameters for university tags
         base_url = (
@@ -248,7 +252,7 @@ def get_brandwatch_data(start_date, end_date, project_id=None, account_id=None):
         
         if account_id_use:
             base_url += f"&accountId={account_id_use}"
-            print(f"[INFO] Added account ID {account_id_use} to request URL")
+            logger.info("Added account ID %s to request URL", account_id_use)
         
         # Fetch all data with pagination
         cursor = None
@@ -261,14 +265,14 @@ def get_brandwatch_data(start_date, end_date, project_id=None, account_id=None):
                 break
             all_data.extend(results)
             cursor = data.get("nextCursor")
-            print(f"[INFO] Fetched {len(results)} mentions, total so far: {len(all_data)}")
+            logger.info("Fetched %s mentions, total so far: %s", len(results), len(all_data))
             if len(results) < 5000 or not cursor:
                 break
         
         return all_data
         
     except Exception as e:
-        print(f"[ERROR] Failed to get data from Brandwatch API: {e}")
+        logger.error("Failed to get data from Brandwatch API: %s", e)
         raise
 
 def convert_to_hk_time(date_str):
@@ -292,7 +296,7 @@ def convert_to_hk_time(date_str):
         hk_tz = pytz.timezone('Asia/Hong_Kong')
         return dt.astimezone(hk_tz)
     except Exception as e:
-        print(f"Error processing date {date_str}: {e}")
+        logger.error("Error processing date %s: %s", date_str, e)
         # Return None for failed conversions instead of raising an exception
         return None
 
@@ -362,7 +366,7 @@ Return your answer in this JSON format, using only the allowed values:
         # If still failing, raise to trigger fallback
         raise ValueError("Could not parse JSON from model response")
     except Exception as e:
-        print(f"[ERROR] AI sentiment classification failed: {e}")
+        logger.error("AI sentiment classification failed: %s", e)
         # Simple rule-based fallback: detect sentiment keywords
         text_lower = text.lower() if isinstance(text, str) else ""
         pos = any(kw in text_lower for kw in ['great','excellent','good','amazing','love','recommend','best','perfect'])
@@ -512,7 +516,7 @@ Important style rules:
         }
 
     except Exception as e:
-        print(f"[ERROR] Failed to generate AI summary: {e}")
+        logger.error("Failed to generate AI summary: %s", e)
         return {
             "overall": f"Unable to generate summary: {str(e)}",
             "analysis": "No content found.",
@@ -523,19 +527,19 @@ Important style rules:
 def generate_topic_summaries(df, end_date):
     """Generate AI summaries for each topic's mentions on the end date"""
     if df.empty:
-        print("[WARNING] No data available for summaries")
+        logger.warning("No data available for summaries")
         return {}
     
-    print(f"[DEBUG] Generating summaries for end date: {end_date}")
-    print(f"[DEBUG] DataFrame date range: {df['date_day'].min()} to {df['date_day'].max()}")
-    print(f"[DEBUG] Date values in DataFrame: {sorted(df['date_day'].unique())}")
+    logger.debug("Generating summaries for end date: %s", end_date)
+    logger.debug("DataFrame date range: %s to %s", df['date_day'].min(), df['date_day'].max())
+    logger.debug("Date values in DataFrame: %s", sorted(df['date_day'].unique()))
     
     # Filter data for end date
     end_date_df = df[df['date_day'] == end_date]
-    print(f"[DEBUG] Found {len(end_date_df)} mentions for end date {end_date}")
+    logger.debug("Found %s mentions for end date %s", len(end_date_df), end_date)
     
     if end_date_df.empty:
-        print(f"[WARNING] No mentions found for end date {end_date}")
+        logger.warning("No mentions found for end date %s", end_date)
         return {}
     
     # Group by topic
@@ -546,15 +550,15 @@ def generate_topic_summaries(df, end_date):
     for topic, topic_df in topic_groups:
         topic_mentions = topic_df.to_dict('records')
         if topic_mentions:
-            print(f"[DEBUG] Generating summary for {topic} with {len(topic_mentions)} mentions")
+            logger.debug("Generating summary for %s with %s mentions", topic, len(topic_mentions))
             summaries[topic] = generate_ai_summary(topic_mentions)
         else:
-            print(f"[WARNING] No mentions found for {topic} on {end_date}")
+            logger.warning("No mentions found for %s on %s", topic, end_date)
     
     # Make sure all topics have a summary
     for topic in TOPIC_LIST:
         if topic not in summaries:
-            print(f"[DEBUG] Adding default summary for {topic} (no mentions found)")
+            logger.debug("Adding default summary for %s (no mentions found)", topic)
             summaries[topic] = {
                 "overall": "No mentions found for this topic on the end date.",
                 "analysis": "No content found.",
@@ -562,28 +566,28 @@ def generate_topic_summaries(df, end_date):
                 "urls": []
             }
     
-    print(f"[INFO] Generated summaries for {len(summaries)} topics")
+    logger.info("Generated summaries for %s topics", len(summaries))
     return summaries
 
 def process_brandwatch_data(data, start_dt, end_dt, topics_df):
     """Process Brandwatch data"""
     if not data:
-        print("[ERROR] No data received from API")
+        logger.error("No data received from API")
         return pd.DataFrame()
     
     # Convert data to DataFrame
     df = pd.DataFrame(data)
     
     # Print detailed debug info
-    print(f"[DEBUG] Raw data count: {len(df)}")
-    print(f"[DEBUG] Available columns in Brandwatch data: {df.columns.tolist()}")
+    logger.debug("Raw data count: %s", len(df))
+    logger.debug("Available columns in Brandwatch data: %s", df.columns.tolist())
     
     # Check if tags field exists
     if 'tags' not in df.columns:
-        print("[ERROR] 'tags' field not found in data. Cannot identify topics.")
-        print("[DEBUG] Sample data (first record):")
+        logger.error("'tags' field not found in data. Cannot identify topics.")
+        logger.debug("Sample data (first record):")
         if len(df) > 0:
-            print(df.iloc[0].to_dict())
+            logger.debug(df.iloc[0].to_dict())
         return pd.DataFrame()
     
     # Check necessary columns
@@ -591,43 +595,43 @@ def process_brandwatch_data(data, start_dt, end_dt, topics_df):
     missing_columns = [col for col in required_columns if col not in df.columns]
     
     if missing_columns:
-        print(f"[ERROR] Missing critical columns in Brandwatch data: {missing_columns}")
+        logger.error("Missing critical columns in Brandwatch data: %s", missing_columns)
         return pd.DataFrame()
     
     # Map the actual API columns to expected columns
-    print("[INFO] Mapping API columns to expected structure...")
+    logger.info("Mapping API columns to expected structure...")
     
     # Handle date column (already checked it exists)
     df['date_crawled'] = df['date']
     
     # Use fullText for content if available
     if 'fullText' in df.columns:
-        print("[INFO] Using 'fullText' as content field")
+        logger.info("Using 'fullText' as content field")
         df['content'] = df['fullText'].fillna('')
     else:
-        print("[WARNING] 'fullText' column not found, checking alternatives")
+        logger.warning("'fullText' column not found, checking alternatives")
         content_fields = ['snippet', 'text']
         found_content = False
         for field in content_fields:
             if field in df.columns:
-                print(f"[INFO] Using '{field}' as content field")
+                logger.info("Using '%s' as content field", field)
                 df['content'] = df[field].fillna('')
                 found_content = True
                 break
         
         if not found_content:
-            print("[WARNING] No content field found, using empty values")
+            logger.warning("No content field found, using empty values")
             df['content'] = ''
     
     # Ensure all required columns exist for deduplication
     subset_cols = [col for col in ['originalUrl', 'date_crawled'] if col in df.columns]
     if subset_cols:
         df = df.drop_duplicates(subset=subset_cols)
-        print(f"[DEBUG] After deduplication: {len(df)} mentions")
+        logger.debug("After deduplication: %s mentions", len(df))
     
     # Convert crawl date to Hong Kong time
     df['date_hk'] = df['date_crawled'].apply(convert_to_hk_time)
-    print(f"[DEBUG] After date conversion: {len(df.dropna(subset=['date_hk']))} valid dates")
+    logger.debug("After date conversion: %s valid dates", len(df.dropna(subset=['date_hk'])))
     
     # Drop rows with failed date conversions
     df = df.dropna(subset=['date_hk'])
@@ -639,11 +643,11 @@ def process_brandwatch_data(data, start_dt, end_dt, topics_df):
     df['date_naive'] = df['date_hk'].dt.tz_localize(None)
     end_dt_inclusive = (end_dt + timedelta(days=1)) - timedelta(seconds=1)
     df = df[(df['date_naive'] >= start_dt) & (df['date_naive'] <= end_dt_inclusive)]
-    print(f"[INFO] After date filtering: {len(df)} mentions")
+    logger.info("After date filtering: %s mentions", len(df))
     df = df.drop(columns=['date_naive'])
     
     # Print the tags we're looking for
-    print(f"[INFO] Looking for these tags: {TAG_NAMES}")
+    logger.info("Looking for these tags: %s", TAG_NAMES)
     
     # Process mentions and assign tags
     processed_data = []
@@ -669,10 +673,10 @@ def process_brandwatch_data(data, start_dt, end_dt, topics_df):
         
         # Debug the first few rows
         if idx < 3:
-            print(f"\n[DEBUG] Row {idx}:")
-            print(f"Raw tags: {raw_tags}")
-            print(f"Parsed tags: {tags_list}")
-            print(f"Matched tags: {topic_tags}")
+            logger.debug("\nRow %s:", idx)
+            logger.debug("Raw tags: %s", raw_tags)
+            logger.debug("Parsed tags: %s", tags_list)
+            logger.debug("Matched tags: %s", topic_tags)
         
         # Skip if no matching tags found
         if not topic_tags:
@@ -692,7 +696,7 @@ def process_brandwatch_data(data, start_dt, end_dt, topics_df):
         for tag in topic_tags:
             topic_display = TAG_TO_TOPIC.get(tag)
             if not topic_display:
-                print(f"[WARNING] Tag {tag} not found in TAG_TO_TOPIC mapping, skipping")
+                logger.warning("Tag %s not found in TAG_TO_TOPIC mapping, skipping", tag)
                 continue
             
             processed_data.append({
@@ -704,17 +708,17 @@ def process_brandwatch_data(data, start_dt, end_dt, topics_df):
                 'fullText': content
             })
     
-    print(f"\n[INFO] Processing Summary:")
-    print(f"Total mentions processed: {len(df)}")
-    print(f"Final mentions after processing: {len(processed_data)}")
-    print("\n[INFO] Tag counts:")
+    logger.info("\nProcessing Summary:")
+    logger.info("Total mentions processed: %s", len(df))
+    logger.info("Final mentions after processing: %s", len(processed_data))
+    logger.info("\nTag counts:")
     for tag, count in tag_counts.items():
         topic_name = TAG_TO_TOPIC.get(tag, "Unknown")
-        print(f"  - {tag} ({topic_name}): {count}")
+        logger.info("  - %s (%s): %s", tag, topic_name, count)
     
     # Convert to DataFrame
     result_df = pd.DataFrame(processed_data)
-    print(f"[INFO] Final processed data: {len(result_df)} topic mentions")
+    logger.info("Final processed data: %s topic mentions", len(result_df))
     
     return result_df
 
@@ -723,19 +727,19 @@ def calculate_buzz_volume(df):
     Calculate buzz volume as count of unique originalUrls per topic and date
     """
     if df.empty:
-        print("[WARNING] No data to calculate buzz volume")
+        logger.warning("No data to calculate buzz volume")
         return pd.DataFrame()
     
     # Print data shape before calculation
-    print(f"[DEBUG] Buzz calculation input: {df.shape}")
+    logger.debug("Buzz calculation input: %s", df.shape)
     
     # Count unique originalUrls by topic and date
     buzz = df.groupby(['topic', 'date_day']).originalUrl.nunique().reset_index(name='buzz_volume')
-    print(f"[INFO] Calculated buzz volume using unique originalUrls")
+    logger.info("Calculated buzz volume using unique originalUrls")
     
     # Print the raw counts
-    print("[DEBUG] Raw buzz counts:")
-    print(buzz)
+    logger.debug("Raw buzz counts:")
+    logger.debug("%s", buzz)
     
     # Create pivot table using date_day
     pivot = buzz.pivot(index='topic', columns='date_day', values='buzz_volume')
@@ -762,7 +766,7 @@ def calculate_buzz_volume(df):
     # Fill NaN values with 0
     pivot = pivot.fillna(0).astype(int)
     
-    print("[DEBUG] Final pivot table shape:", pivot.shape)
+    logger.debug("Final pivot table shape: %s", pivot.shape)
     return pivot
 
 def create_charts(pivot_data):
@@ -770,7 +774,7 @@ def create_charts(pivot_data):
     Create visualization charts from the buzz volume data
     """
     if pivot_data is None or pivot_data.empty:
-        print("No data available for charts")
+        logger.warning("No data available for charts")
         return None
     
     # Get topics and dates
@@ -778,7 +782,7 @@ def create_charts(pivot_data):
     dates = pivot_data.columns.tolist()
     
     if not dates:
-        print("No date columns available for charts")
+        logger.warning("No date columns available for charts")
         return None
     
     # Sort topics by total volume for better visual
@@ -1040,7 +1044,7 @@ def process_report(start_date, end_date, project_id=None, account_id=None, regio
             current_dt += timedelta(days=1)
         
         # Fetch raw data from Brandwatch API
-        print(f"[INFO] Fetching data from Brandwatch API for region {region_label or 'default'}...")
+        logger.info("Fetching data from Brandwatch API for region %s...", region_label or 'default')
         raw_data = get_brandwatch_data(start_date, end_date, project_id=project_id, account_id=account_id)
         
         # Process data - explode tags and calculate unique URL counts
@@ -1049,7 +1053,7 @@ def process_report(start_date, end_date, project_id=None, account_id=None, regio
         
         # Check if we have data to process
         if df.empty:
-            print("[WARNING] No data available for processing.")
+            logger.warning("No data available for processing.")
             # Create a simple report saying no data available
             simple_html = """
 <html>
@@ -1065,7 +1069,7 @@ def process_report(start_date, end_date, project_id=None, account_id=None, regio
             html_path = os.path.join(output_dir, f"{filename_base}.html")
             with open(html_path, "w", encoding="utf-8") as f:
                 f.write(simple_html)
-            print(f"[INFO] Empty report generated: {html_path}")
+            logger.info("Empty report generated: %s", html_path)
             return html_path
         
         # Calculate buzz volume
@@ -1075,9 +1079,9 @@ def process_report(start_date, end_date, project_id=None, account_id=None, regio
         chart_base64 = create_charts(buzz_pivot)
         
         # Generate AI summaries for each topic on the end date
-        print(f"[INFO] Generating AI summaries for topics on {end_date}...")
+        logger.info("Generating AI summaries for topics on %s...", end_date)
         summaries = generate_topic_summaries(df, end_date)
-        print(f"[DEBUG] Summaries generated: {len(summaries)}")
+        logger.debug("Summaries generated: %s", len(summaries))
         
         # Generate HTML report
         html_report = generate_html_report(buzz_pivot, chart_base64, summaries)
@@ -1090,12 +1094,12 @@ def process_report(start_date, end_date, project_id=None, account_id=None, regio
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(html_report)
         
-        print(f"[INFO] HTML report generated: {html_path}")
+        logger.info("HTML report generated: %s", html_path)
         
         return html_path
     
     except Exception as e:
-        print(f"[ERROR] Error in process_report function: {e}")
+        logger.error("Error in process_report function: %s", e)
         import traceback
         traceback.print_exc()
         return f"Error: {str(e)}"
@@ -1107,7 +1111,7 @@ def run_reports(job_id: str, start_date: str, end_date: str):
         JOB_STORE[job_id]["step"] = "Fetching Brandwatch data"
 
         # 1) Brandwatch report (single region)
-        print(f"[JOB {job_id}] Generating Brandwatch report")
+        logger.info("[JOB %s] Generating Brandwatch report", job_id)
         path = process_report(start_date, end_date, account_id=BRANDWATCH_ACCOUNT_ID)
         with open(path, "r", encoding="utf-8") as fp:
             html_segment = fp.read()
@@ -1120,7 +1124,7 @@ def run_reports(job_id: str, start_date: str, end_date: str):
         # 2) Perplexity search section
         if PERPLEXITY_API_KEY:
             JOB_STORE[job_id]["step"] = "Performing web search"
-            print(f"[JOB {job_id}] Searching web for HK university mentions (last 24h)")
+            logger.info("[JOB %s] Searching web for HK university mentions (last 24h)", job_id)
 
             uni_queries = {
                 "CUHK": "CUHK OR 'Chinese University of Hong Kong' OR 香港中文大學",
@@ -1186,7 +1190,7 @@ def gradio_interface(start_date, end_date):
     """Gradio interface for report generation"""
     try:
         # No date validation - use exactly what user provided
-        print(f"[INFO] Processing report for date range: {start_date} to {end_date}")
+        logger.info("Processing report for date range: %s to %s", start_date, end_date)
         
         # Process the report with the given date range
         result = process_report(start_date, end_date)
@@ -1201,6 +1205,7 @@ def gradio_interface(start_date, end_date):
         
         return html_content
     except Exception as e:
+        logger.error("Error generating report: %s", e)
         return f"Error generating report: {str(e)}"
 
 def main():
@@ -1380,6 +1385,7 @@ def main():
     uvicorn.run(app, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     main()
 
 def top_sources_by_platform(df, platform=None):
