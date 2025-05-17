@@ -93,3 +93,7 @@ docker run --env-file env.example -p 8081:8081 cupro
 ```
 
 This starts the application inside a container and exposes it on <http://localhost:8081>.
+
+## Amazon App Runner
+
+To deploy with Amazon App Runner, the service expects an `apprunner.yaml` file in the repository root. This file defines how the application is built and run. Configure all required environment variables using the keys from [`env.example`](env.example) in the App Runner service settings.
